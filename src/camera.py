@@ -192,6 +192,9 @@ class Recorder:
             else:
                 self.logger.info("GStreamer pipeline stopped.")
 
+            if self.loop and self.loop.is_running():
+                self.logger.info("Stopping GLib loop")
+                self.loop.quit()
             
             self.logger.info("Sending shutdown signal to CSV writer thread...")
             self.frame_info_queue.put(None)  
@@ -206,8 +209,6 @@ class Recorder:
 
                 self.csv_thread = None
 
-            if self.loop and self.loop.is_running():
-                self.loop.quit()
 
             self.recording = False
 
@@ -226,6 +227,6 @@ if __name__ == "__main__":
 
     my_robot = DummyRobot()
 
-    recorder = Recorder(robot=my_robot, width=224, height=224, fps=1, directory="dummy_data")
+    recorder = Recorder(robot=my_robot, width=224, height=224, fps=30, directory="dummy_data")
     
     recorder.start_recording_jpegs("test_run_1")

@@ -9,3 +9,5 @@ __pycache__/
 tmp/
 
 jetbot/
+
+dummy_data/
