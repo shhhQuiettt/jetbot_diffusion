@@ -142,12 +142,12 @@ class Recorder:
         except queue.Full:
             self.logger.error("Frame info queue is full (size: {})".format(self.frame_info_queue.qsize()))
             self.logger.error("Last frame info: {}".format(frame_info))
-            self.stop()
+            GLib.idle_add(self.stop)  
 
 
         self.frame_counter += 1
 
-    def _start_csv_writer(self, csv_path: str):
+    def _start_csv_writer(self, csv_path):
         def _csv_writer_worker(): 
             assert not os.path.exists(csv_path), "Csv writer: CSV file {} already exists.".format(csv_path)
             with open(csv_path, mode='w', newline='') as csv_file:
@@ -175,15 +175,26 @@ class Recorder:
 
     def stop(self):
         if self.gst_pipeline and self.recording:
+            self.logger.info("Sending EOS event...")
             self.gst_pipeline.send_event(Gst.Event.new_eos())
 
-            time.sleep(0.5)
+            bus = self.gst_pipeline.get_bus()
+            msg = bus.timed_pop_filtered(2 * Gst.SECOND, Gst.MessageType.EOS | Gst.MessageType.ERROR)
+            
+            if msg:
+                self.logger.info("EOS or Error received, shutting down pipeline.")
+            else:
+                self.logger.error("EOS timed out. Forcefully shutting down.")
 
-            self.gst_pipeline.set_state(Gst.State.NULL)
+            res = self.gst_pipeline.set_state(Gst.State.NULL)
+            if res == Gst.StateChangeReturn.FAILURE:
+                self.logger.error("Failed to stop GStreamer pipeline.")
+            else:
+                self.logger.info("GStreamer pipeline stopped.")
 
-            sel
-
-            self.frame_info_queue.put(None)  # Send shutdown signal to CSV writer thread
+            
+            self.logger.info("Sending shutdown signal to CSV writer thread...")
+            self.frame_info_queue.put(None)  
             self.logger.info("Waiting for CSV writer thread to finish...")
 
             if self.csv_thread is not None:
@@ -192,6 +203,8 @@ class Recorder:
                     self.logger.warning("CSV writer thread did not finish within timeout :(")
                 else:
                     self.logger.info("CSV writer thread finished successfully.")
+
+                self.csv_thread = None
 
             if self.loop and self.loop.is_running():
                 self.loop.quit()
