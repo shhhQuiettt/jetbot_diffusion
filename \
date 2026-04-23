@@ -30,11 +30,10 @@ class Recorder:
 
         self.recording = False
         self.gst_pipeline = None
-        self.loop = None
 
         self.frame_counter = 0
         self.frame_info_queue = queue.Queue(maxsize = 32)
-        self.csv_thread = None
+        self.csv_writer_thread = None
 
         self.logger = logging.getLogger("Recorder")
         self.logger.setLevel(logging.DEBUG)
@@ -81,7 +80,6 @@ class Recorder:
         assert not os.path.exists(csv_path), "CSV file {} already exists.".format(csv_path)
         assert not os.path.exists(images_path), "Images directory {} already exists.".format(images_path)
 
-        os.makedirs(images_path, exist_ok=False)
 
         pipeline_string = self._gst_str(images_path)
         self.gst_pipeline = Gst.parse_launch(pipeline_string)
@@ -125,7 +123,6 @@ class Recorder:
         filename = "frame_{:05d}.jpg".format(self.frame_counter)
         timestamp = buffer.pts  
 
-        # This is a race condition - robot can be update them while reading, but idc, they are floats, so not a big issue
         left_value = self.robot.left_motor.value
         right_value = self.robot.right_motor.value
         assert left_value is not None and right_value is not None, "Motor values should not be None"
@@ -180,21 +177,14 @@ class Recorder:
             time.sleep(0.5)
 
             self.gst_pipeline.set_state(Gst.State.NULL)
-
-            sel
-
             self.frame_info_queue.put(None)  # Send shutdown signal to CSV writer thread
             self.logger.info("Waiting for CSV writer thread to finish...")
 
-            if self.csv_thread is not None:
-                self.csv_thread.join(timeout=5)
-                if self.csv_thread.is_alive():
-                    self.logger.warning("CSV writer thread did not finish within timeout :(")
-                else:
-                    self.logger.info("CSV writer thread finished successfully.")
-
-            if self.loop and self.loop.is_running():
-                self.loop.quit()
+            self.csv_thread.join(timeout=5)
+            if self.csv_thread.is_alive():
+                self.logger.warning("CSV writer thread did not finish within timeout :(")
+            else:
+                self.logger.info("CSV writer thread finished successfully.")
 
             self.recording = False
 
@@ -202,17 +192,9 @@ class Recorder:
 
 
 if __name__ == "__main__":
-    class DummyMotor:
-        def __init__(self):
-            self.value = 0.5
+    output_directory = "./test_ouput"
+    os.makedirs(output_directory, exist_ok=True)
 
-    class DummyRobot:
-        def __init__(self):
-            self.left_motor = DummyMotor()
-            self.right_motor = DummyMotor()
+    recorder = Recorder(width=224, height=224, fps=1)
 
-    my_robot = DummyRobot()
-
-    recorder = Recorder(robot=my_robot, width=224, height=224, fps=1, directory="dummy_data")
-    
-    recorder.start_recording_jpegs("test_run_1")
+    recorder.start_recording_jpegs(output_directory)
