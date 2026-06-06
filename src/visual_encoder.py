@@ -155,13 +155,59 @@ class ResNet18(nn.Module):
         return embedding
 
 
+class MergingResnet18(nn.Module):
+    """
+        Takes embedings of a multiple images and runs it through an mlp leyer
+    """
+    def __init__(self, num_images, input_channels, embedding_size, num_groups):
+        super().__init__()
+        self.num_images = num_images
+        self.resnet = ResNet18(input_channels, embedding_size, num_groups)
+
+        self.fc1 = nn.Linear(embedding_size * num_images, embedding_size)
+        self.relu = nn.ReLU(inplace=True)
+        self.fc2 = nn.Linear(embedding_size, embedding_size)
+
+
+    def forward(self, x):
+        assert x.shape[1] == self.num_images, f"Expected input with {self.num_images} images, got {x.shape[1]} (Shape: {x.shape})"
+        batch_size = x.shape[0]
+
+        embeddings = []
+        for i in range(self.num_images):
+            img = x[:, i, :, :, :]  # Shape: [B, C, H, W]
+            embedding = self.resnet(img)  # Shape: [B, embedding_size]
+            embeddings.append(embedding)
+
+        merged_embedding = torch.cat(embeddings, dim=-1)  # Shape: [B, embedding_size * num_images]
+        x = self.fc1(merged_embedding)  # Shape: [B, embedding_size]
+        x = self.relu(x)
+        final_embedding = self.fc2(x)  # Shape: [B, embedding_size]
+        return final_embedding
+
 # --- Example Usage ---
 if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = ResNet18(input_channels=3, embedding_size=128).to(device)
-    print("Model Summary:")
-    summary(model, (3, 224, 224))
+    # print("Resnet18")
+    # model = ResNet18(input_channels=3, embedding_size=128).to(device)
+    # print("Model Summary:")
+    # summary(model, (3, 224, 224))
 
-    with FlopCounterMode(display=True) as flop_counter:
-        dummy_input = torch.randn(4, 3, 224, 224).to(device)
-        output = model(dummy_input)
+    # with FlopCounterMode(display=True) as flop_counter:
+    #     dummy_input = torch.randn(4, 3, 224, 224).to(device)
+    #     output = model(dummy_input)
+
+    # del model
+    # torch.cuda.empty_cache()
+    print("\nMergedResnet18 with 4 images")
+    model = MergingResnet18(num_images=4, input_channels=3, embedding_size=128).to(device)
+    print("Model Summary:")
+    dummy_data = torch.randn(4, 4, 3, 224, 224).to(device)
+    res=model(dummy_data)  # Run a forward pass to initialize parameters for summary
+    print(res.shape)
+
+    # with FlopCounterMode(display=True) as flop_counter:
+    #     dummy_input = torch.randn(4, 4, 3, 224, 224).to(device)
+    #     output = model(dummy_input)
+
+

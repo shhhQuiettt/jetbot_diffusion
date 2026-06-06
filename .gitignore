@@ -11,3 +11,6 @@ tmp/
 jetbot/
 
 dummy_data/
+
+data/f1tenth_long_track_sens/
+models/

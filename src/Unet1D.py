@@ -89,25 +89,23 @@ class ConditionalResidualBlock1D(nn.Module):
         return out + self.residual_proj(x)
 
 class ConditionalUnet1D(nn.Module):
-    """Main 1D U-Net Architecture for Action Diffusion (PATCHED)"""
-    def __init__(self, action_dim, obs_dim, embed_dim=256, down_dims=[256, 512, 1024]):
+    def __init__(self, sequence_features_dim, time_dim, guidance_dim, down_dims): #[256, 512, 1024]
         super().__init__()
-        self.action_dim = action_dim
-        self.obs_dim = obs_dim
+        self.sequence_features_dim = sequence_features_dim
+        self.obs_dim = time_dim
         
-        # 1. Timestep Embedding setup
         self.time_mlp = nn.Sequential(
             # SinusoidalPosEmb(embed_dim),
-            FourierEncoder(embed_dim),
-            nn.Linear(embed_dim, embed_dim * 4),
+            FourierEncoder(guidance_dim),
+            nn.Linear(guidance_dim, guidance_dim * 4),
             nn.Mish(),
-            nn.Linear(embed_dim * 4, embed_dim)
+            nn.Linear(guidance_dim * 4, guidance_dim)
         )
         
-        cond_dim = embed_dim + obs_dim
+        cond_dim = guidance_dim + time_dim
         
         # Initial convolution mapping action_dim to first hidden dim
-        self.init_conv = nn.Conv1d(action_dim, down_dims[0], kernel_size=3, padding=1)
+        self.init_conv = nn.Conv1d(sequence_features_dim, down_dims[0], kernel_size=3, padding=1)
         
         # 2. Encoder (Downsampling)
         self.down_blocks = nn.ModuleList()
@@ -141,17 +139,15 @@ class ConditionalUnet1D(nn.Module):
         # Final projection back to action dimensions
         self.final_conv = nn.Sequential(
             ConditionalResidualBlock1D(down_dims[0] * 2, down_dims[0], cond_dim),
-            nn.Conv1d(down_dims[0], action_dim, kernel_size=1)
+            nn.Conv1d(down_dims[0], sequence_features_dim, kernel_size=1)
         )
 
-    def forward(self, x, timestep, global_cond):
+    def forward(self, x, timestep, guidance_emb):
         t_emb = self.time_mlp(timestep)
-        cond = torch.cat([t_emb, global_cond], dim=-1)
+        cond = torch.cat([t_emb, guidance_emb], dim=-1)
         
-        # Pass through initial conv
         x = self.init_conv(x)
         
-        # FIX: We must save the output of the init_conv to match the final decoder layer!
         hiddens = [x] 
         
         # Encoder
@@ -161,11 +157,9 @@ class ConditionalUnet1D(nn.Module):
             hiddens.append(x)
             x = downsample(x)
             
-        # Bottleneck
         x = self.mid_block1(x, cond)
         x = self.mid_block2(x, cond)
         
-        # Decoder
         for res1, res2, upsample in self.up_blocks:
             h = hiddens.pop()
             x = torch.cat([x, h], dim=1) 
@@ -173,8 +167,7 @@ class ConditionalUnet1D(nn.Module):
             x = res2(x, cond)
             x = upsample(x)
             
-        # Final layers
-        h = hiddens.pop() # This will no longer be empty!
+        h = hiddens.pop() 
         x = torch.cat([x, h], dim=1)
         x = self.final_conv[0](x, cond)
         x = self.final_conv[1](x)
