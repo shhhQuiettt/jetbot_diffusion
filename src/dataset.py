@@ -13,6 +13,7 @@ import random
 
 IMAGE_SIZE = (24, 24)
 
+
 def train_tensor_to_255_numpy(tensor: torch.Tensor) -> npt.NDArray[np.uint8]:
     mean = torch.tensor([0.485, 0.456, 0.406], device=tensor.device).view(3, 1, 1)
     std = torch.tensor([0.229, 0.224, 0.225], device=tensor.device).view(3, 1, 1)
@@ -28,7 +29,15 @@ def train_tensor_to_255_numpy(tensor: torch.Tensor) -> npt.NDArray[np.uint8]:
 
 
 class CarDataset(torch.utils.data.Dataset):
-    def __init__(self, ride_dir, *, future_horizont, past_horizont, transform=None, device="cpu", ):
+    def __init__(
+        self,
+        ride_dir,
+        *,
+        future_horizont,
+        past_horizont,
+        transform=None,
+        device="cpu",
+    ):
         self.logger = logging.getLogger(self.__class__.__name__)
         self.past_horizont = past_horizont
         self.forward_horizont = future_horizont
@@ -66,7 +75,6 @@ class CarDataset(torch.utils.data.Dataset):
             signals_curr = []
 
             for row in df.itertuples():
-
                 assert len(row) >= 4  # first is index
 
                 image_path = os.path.join(image_dir_name, str(row[1]).zfill(4) + ".jpg")
@@ -83,34 +91,43 @@ class CarDataset(torch.utils.data.Dataset):
                 signals_curr.append([forward_signal, left_signal])
             images = torch.stack(images_curr, dim=0).to(device)
             # pad past from the left and future horizons from the right with zeros
-            
+
             images_padded = torch.zeros(
-                (len(images_curr) + self.past_horizont + self.forward_horizont, *images.shape[1:]),
+                (
+                    len(images_curr) + self.past_horizont + self.forward_horizont,
+                    *images.shape[1:],
+                ),
                 dtype=images.dtype,
                 device=device,
             )
-            images_padded[self.past_horizont : self.past_horizont + len(images_curr)] = images
+            images_padded[
+                self.past_horizont : self.past_horizont + len(images_curr)
+            ] = images
             self.image_sequences.append(images_padded)
 
             signals = torch.tensor(signals_curr, dtype=torch.float32, device=device)
             signals_padded = torch.zeros(
-                (len(signals_curr) + self.past_horizont + self.forward_horizont, signals.shape[1]),
+                (
+                    len(signals_curr) + self.past_horizont + self.forward_horizont,
+                    signals.shape[1],
+                ),
                 dtype=signals.dtype,
                 device=device,
             )
-            signals_padded[self.past_horizont : self.past_horizont + len(signals_curr)] = signals
+            signals_padded[
+                self.past_horizont : self.past_horizont + len(signals_curr)
+            ] = signals
 
+            signals_padded = signals_padded.permute(
+                1, 0
+            )  # transpose to (features, sequence_length)
             assert signals.ndim == 2
-            assert signals_padded.shape[0] == 2
+            assert signals_padded.shape[0] == 2, f"{signals_padded.shape=}"
 
-            self.signals_sequences.append(
-                signals_padded
-            )
-
+            self.signals_sequences.append(signals_padded)
 
             assert (
-                self.image_sequences[-1].shape[0]
-                == self.signals_sequences[-1].shape[0]
+                self.image_sequences[-1].shape[0] == self.signals_sequences[-1].shape[1]
             ), (
                 f"Number of images and signals do not match in {csv_file_name} after stacking."
             )
@@ -132,24 +149,34 @@ class CarDataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.signals_sequences)
 
-    def __getitem__(self, idx): 
-        if idx < 0 or idx >= len(self.signals_sequences): raise IndexError(
+    def __getitem__(self, idx):
+        if idx < 0 or idx >= len(self.signals_sequences):
+            raise IndexError(
                 f"Index {idx} is out of bounds for dataset of size {len(self.signals_sequences)}."
             )
 
         images, signals = self.image_sequences[idx], self.signals_sequences[idx]
 
-        random_frame_id = random.randint(self.past_horizont, images.shape[0] - self.forward_horizont - 1)
+        random_frame_id = random.randint(
+            self.past_horizont, images.shape[0] - self.forward_horizont - 1
+        )
 
         past_images = images[random_frame_id - self.past_horizont : random_frame_id]
-        future_signals = signals[random_frame_id : random_frame_id + self.forward_horizont]
+        future_signals = signals[
+            :, random_frame_id : random_frame_id + self.forward_horizont
+        ]
 
-        # assert not (gur[0] == 0.0).all(), f"First past image is all zeros for index {idx} and frame id {random_frame_id}."
+        assert past_images.shape[0] == self.past_horizont, (
+            f"Past images shape mismatch: {past_images.shape} vs expected {self.past_horizont}"
+        )
+        assert future_signals.shape[1] == self.forward_horizont, (
+            f"Future signals shape mismatch: {future_signals.shape} vs expected {self.forward_horizont}"
+        )
+        assert future_signals.shape[0] == 2, (
+            f"Future signals feature dimension mismatch: {future_signals.shape[0]} vs expected 2"
+        )
 
         return past_images, future_signals
-
-        
-
 
 
 def display_dataset(dataset: CarDataset, fps: int):
@@ -201,7 +228,9 @@ def display_dataset(dataset: CarDataset, fps: int):
                 image = train_tensor_to_255_numpy(ride_images[i])
                 image = cv2.resize(image, (WINDOW_WIDTH, WINDOW_HEIGHT))
                 forward_signal, left_signal = ride_signals[i].cpu().numpy()
-                current_datapoints.append((np.ascontiguousarray(image), (forward_signal, left_signal)))
+                current_datapoints.append(
+                    (np.ascontiguousarray(image), (forward_signal, left_signal))
+                )
 
         current_frame, current_signal = current_datapoints[current_frame_index]
 
@@ -211,7 +240,9 @@ def display_dataset(dataset: CarDataset, fps: int):
         rl.ClearBackground(rl.RAYWHITE)
         rl.DrawTexture(texture, 0, 0, (255, 255, 255, 255))
         rl.DrawText(
-            f"Forward: {current_signal[0]:.2f}, Left: {current_signal[1]:.2f}".encode("utf-8"),
+            f"Forward: {current_signal[0]:.2f}, Left: {current_signal[1]:.2f}".encode(
+                "utf-8"
+            ),
             10,
             WINDOW_HEIGHT - 30,
             20,
@@ -225,8 +256,8 @@ def display_dataset(dataset: CarDataset, fps: int):
 if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG)
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    dataset = CarDataset("./dataset/", device=device, future_horizont=5, past_horizont=3)
+    dataset = CarDataset(
+        "./dataset/", device=device, future_horizont=5, past_horizont=3
+    )
     # print(f"Dataset length: {len(dataset)}")
     # display_dataset(dataset, 24)
-
-

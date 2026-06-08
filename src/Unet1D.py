@@ -20,8 +20,8 @@ class FourierEncoder(nn.Module):
         Returns:
         - embeddings: b d
         """
-        print(f"{t.shape=}")
-        print(f"{self.weights.shape=}")
+        # print(f"{t.shape=}")
+        # print(f"{self.weights.shape=}")
         frequencies = 2 * torch.pi * self.weights * t.unsqueeze(1)
 
         sin_part = torch.sin(frequencies)
